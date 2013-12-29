@@ -1,14 +1,14 @@
-#ifndef <KMEM_CACHE_H>
-#define <KMEM_CACHE_H>
+#ifndef KMEM_CACHE_H
+#define KMEM_CACHE_H
 
 #include <stdlib.h>
 
-#define SLAB_SIZE 4096
+#define SLAB_SIZE 1024
 #define WORD 4
 #define KM_SLEEP 0
 #define KM_NOSLEEP 1
 
-typedef void (*)(void *, size_t) kc_fn_t;
+typedef void (*kc_fn_t)(void *, size_t);
 
 struct kmem_bufctl {
 	struct kmem_bufctl *next;
