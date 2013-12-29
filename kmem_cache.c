@@ -12,10 +12,7 @@ size_t kmem_cache_sz = sizeof(struct kmem_cache);
 int
 __align_offset(size_t size, int align)
 {
-	if(!align)
-		return 0;
-	else 
-		return align - size % align;
+	return !align ? 0 : (align - size % align);
 }
 
 void
@@ -44,7 +41,7 @@ __init_buf(void *slab, int buf_sz, int buf_amt)
 		curr    = slab + buf_sz * i ;	
 		curr[0] =  slab + buf_sz * (i + 1);
 
-		printf("__init_buf: curr_addr %d, curr_val %d\n", &curr[0], curr[0]);
+		//printf("__init_buf: curr_addr %d, curr_val %d\n", &curr[0], curr[0]);
 	}
 		
 	curr[0]  = slab;
@@ -59,7 +56,7 @@ __create_slab(struct kmem_cache *cp)
 
 	struct kmem_slab *sp_new = slab + cp -> buf_amt * cp -> buf_sz;
 
-	printf("__create_slab: slab %d, sp %d, offset %d\n",slab, sp_new, (int)sp_new - (int)slab);
+	//printf("__create_slab: slab %d, sp %d, offset %d\n",slab, sp_new, (int)sp_new - (int)slab);
 
 
 	__init_slab(sp_new, slab, cp -> buf_sz, cp -> buf_amt);
@@ -96,21 +93,6 @@ __sort_slab(struct kmem_slab *sp)
 	}
 }
 
-void
-__rem_buf(struct kmem_slab *sp)
-{	
-	void **temp = sp -> fl_head;
-	sp -> fl_head = temp[0];
-}
-
-void
-__add_buf(struct kmem_slab *sp, void *buf)
-{	
-	void **temp = sp -> fl_tail;
-	temp[0] = buf;
-	sp -> fl_tail = buf;
-}
-
 struct kmem_cache *
 kmem_cache_create(char *name, size_t size, int align, kc_fn_t constructor, kc_fn_t destructor)
 {
@@ -124,7 +106,7 @@ kmem_cache_create(char *name, size_t size, int align, kc_fn_t constructor, kc_fn
 	cp -> destructor    = destructor;	
 	
 	//printf("kmem_cache_create: c_sz %d, s_sz %d, b_sz %d\n",kmem_cache_sz, kmem_slab_sz,kmem_bufctl_sz);
-	printf("kmem_cache_create: cp %d, buf_sz %d, buf_amt %d\n",cp,cp->buf_sz,cp->buf_amt);
+	//printf("kmem_cache_create: cp %d, buf_sz %d, buf_amt %d\n",cp,cp->buf_sz,cp->buf_amt);
 
 	cp -> sp            = __create_slab(cp);
 	
@@ -151,7 +133,7 @@ kmem_cache_alloc(struct kmem_cache *cp, int flags)
 
 	//__sort_slab(sp);
 	
-	printf("kmem_cache_alloc: refcnt %d, fl_head %d\n", sp->refcnt, sp->fl_head);
+	//printf("kmem_cache_alloc: refcnt %d, fl_head %d\n", sp->refcnt, sp->fl_head);
 
 	return object;
 }
@@ -176,7 +158,7 @@ kmem_cache_free(struct kmem_cache *cp, void *buf)
 	sp -> refcnt--;
 	//__sort_slab(sp -> next);
 		
-	printf("kmem_cache_free: refcnt %d, fl_tail %d\n", sp->refcnt, sp->fl_tail);
+	//printf("kmem_cache_free: refcnt %d, fl_tail %d\n", sp->refcnt, sp->fl_tail);
 
 }
 

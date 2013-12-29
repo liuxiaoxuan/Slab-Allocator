@@ -3,7 +3,7 @@
 
 #include <stdlib.h>
 
-#define SLAB_SIZE 1024
+#define SLAB_SIZE 4096
 #define WORD 4
 #define KM_SLEEP 0
 #define KM_NOSLEEP 1
