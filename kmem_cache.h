@@ -4,6 +4,8 @@
 #include <stdlib.h>
 
 #define PAGE_SZ 4096
+#define BUF_SZ 512         //boundary size of small obj and big obj
+
 #define WORD 4
 #define KM_SLEEP 0
 #define KM_NOSLEEP 1
@@ -30,7 +32,7 @@ struct kmem_slab {
 	void *fl_tail;
 	
 	int refcnt;
-
+	void *bufstart;
 };
 
 struct kmem_cache {
@@ -61,8 +63,6 @@ kmem_cache_free(struct kmem_cache *cp, void *buf);
 void 
 kmem_cache_destroy(struct kmem_cache *cp);
 
-int 
-__slab_sz(int obj_sz);
 
 void 
 __print_slab(struct kmem_cache *cp);

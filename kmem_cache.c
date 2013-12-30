@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <malloc.h>
 #include <assert.h>
+#include <math.h>
 
 #include <kmem_cache.h>
 
@@ -15,21 +16,37 @@ size_t kmem_slab_sz = sizeof(struct kmem_slab);
 size_t kmem_cache_sz = sizeof(struct kmem_cache);
 
 int
-__align_offset(size_t size, int align)
+__align(int align)
 {
-	return !align ? 0 : (align - size % align);
+	if(!align)
+		return align;
+	if(align == 1)
+		return 2;
+
+	return pow(2, (int)(log2(align) + 0.5)); 
 }
 
 int 
-__slab_sz(int obj_sz)
+__buf_sz(int obj_sz, int align)
 {
-	int i, obj_amt;
+	if(!align || !(obj_sz % align))
+		return obj_sz;
+
+	//printf("%d %d %d \n", obj_sz, align, obj_sz / align);
+
+	return align * ( (int) (obj_sz / align) + 1);	
+}
+
+int 
+__slab_sz(int buf_sz, int align)
+{
+	int i, buf_amt;
 	double inter_fg;
 
 	for(i = 1; i < 10; i++){
-		obj_amt = i * PAGE_SZ / obj_sz;
+		buf_amt = (i * PAGE_SZ - align) / buf_sz;
 
-		inter_fg = 1 - ((double)obj_sz * obj_amt) / (i * PAGE_SZ);
+		inter_fg = 1 - ((double)buf_amt * buf_sz) / (i * PAGE_SZ);
 
 		if( inter_fg < INTER_FG)
 			return i * PAGE_SZ;
@@ -38,53 +55,62 @@ __slab_sz(int obj_sz)
 	return i * PAGE_SZ;
 }
 
-void
-__init_slab(void *ptr, void *slab, int buf_sz, int buf_amt)
-{	
-	struct kmem_slab *sp = ptr;
-
-	sp -> slab          = slab;
-	sp -> refcnt        = 0;
-	sp -> next          = NULL;
-	sp -> prev          = NULL;
-	sp -> fl_head       = slab;
-	sp -> fl_tail       = slab + buf_sz * (buf_amt - 1);
-}
-
 void 
-__init_buf(void *slab, int buf_sz, int buf_amt)
+__init_buf(struct kmem_slab *sp, struct kmem_cache *cp)
 {
 	int i;
 
 	void **curr;
-	
-	//printf("__init_buf: slab %d\n", slab);
 
-	for(i = 0; i < buf_amt; i++){
-		curr    = slab + buf_sz * i ;	
-		*curr   =  slab + buf_sz * (i + 1);
+	for(i = 1; i <= cp -> buf_amt; i++){
+		curr    = sp -> bufstart + cp -> buf_sz * i - void_sz;
+		*curr   = sp -> bufstart + cp -> buf_sz * i;
 
-		//printf("__init_buf: curr_addr %d, curr_val %d\n", &curr[0], curr[0]);
+		//printf("__init_buf: curr_addr %d, curr_val %d\n", curr, *curr);
+
+		if(cp -> slab_sz != PAGE_SZ){
+			curr  = sp -> bufstart + cp -> buf_sz * i - void_sz * 2;		
+			*curr = sp;
+			//printf("__init_buf: curr_addr %d, curr_val %d\n", curr, *curr);
+
+		}	
 	}
-		
-	curr[0]  = slab;
+
+	curr    = sp -> bufstart + cp -> buf_sz * (i - 1) - void_sz;
+	*curr   = sp -> bufstart;
 }
 
 void *
 __create_slab(struct kmem_cache *cp)
 {
-	void *slab = memalign(cp -> slab_sz, cp -> slab_sz);
+	void *slab;
+	struct kmem_slab *sp;
+	int offset = 0;
 
-	assert(!((int)slab % cp -> slab_sz));
+	if(cp -> slab_sz == PAGE_SZ){
+		slab = memalign(cp -> slab_sz, cp -> slab_sz);
+	}else{
+		slab = malloc(cp -> slab_sz);
+		if(cp -> align)
+			offset = cp -> align - (int)slab % cp -> align;
+	}
+	
+	sp = slab + offset + cp -> buf_amt * cp -> buf_sz;
 
-	struct kmem_slab *sp_new = slab + cp -> buf_amt * cp -> buf_sz;
+	sp -> bufstart = slab + offset;
+	sp -> slab          = slab;
+	sp -> refcnt        = 0;
+	sp -> next          = NULL;
+	sp -> prev          = NULL;
 
-	//printf("__create_slab: slab %d, sp %d, offset %d\n",slab, sp_new, (int)sp_new - (int)slab);
+	sp -> fl_head       = sp -> bufstart;
+	sp -> fl_tail       = sp -> fl_head + (cp -> buf_sz - 1) * cp -> buf_amt;
 
-	__init_slab(sp_new, slab, cp -> buf_sz, cp -> buf_amt);
-	__init_buf(slab, cp -> buf_sz, cp -> buf_amt);
+	//printf("__create_slab: slab %d, sp %d, bufstart %d\n",slab, sp, sp -> bufstart);
 
-	return sp_new;
+	__init_buf(sp, cp);
+
+	return sp;
 }
 
 void 
@@ -127,19 +153,26 @@ struct kmem_cache *
 kmem_cache_create(char *name, size_t size, int align, kc_fn_t constructor, kc_fn_t destructor)
 {
 	struct kmem_cache *cp = memalign(PAGE_SZ, PAGE_SZ);
+
+	align = __align(align);
 	
+	if(size > BUF_SZ)
+		size += sizeof(void *) * 2;
+	
+	int buf_sz = __buf_sz(size, align);
+
 	cp -> name          = name;
-	cp -> slab_sz       = __slab_sz(size);
-	cp -> buf_sz        = size + __align_offset(size, align);
-	cp -> buf_amt       = (PAGE_SZ - kmem_slab_sz) / cp -> buf_sz;
 	cp -> align         = align;
+	cp -> buf_sz        = buf_sz;
+	cp -> slab_sz       = __slab_sz(buf_sz, align);
+	cp -> buf_amt       = (cp -> slab_sz - kmem_slab_sz - align ) / buf_sz;
 	cp -> constructor   = constructor;
 	cp -> destructor    = destructor;	
-
-	//printf("kmem_cache_create: cp %d, slab_sz %d, buf_sz %d, buf_amt %d\n",cp,cp->slab_sz, cp->buf_sz,cp->buf_amt);
 	cp -> sp_full       = NULL;
 	cp -> sp_part       = NULL;
 	cp -> sp_empt       = NULL;
+	
+	//printf("kmem_cache_create: cp %d, slab_sz %d, buf_sz %d, buf_amt %d\n",cp,cp->slab_sz, cp->buf_sz,cp->buf_amt);
 
 	return cp;
 }
@@ -162,18 +195,19 @@ kmem_cache_alloc(struct kmem_cache *cp, int flags)
 	sp = cp -> sp_part;
 
 	sp -> refcnt++;
-	void *object = sp -> fl_head;
-	void **temp = sp -> fl_head;
 
+	void *object = sp -> fl_head;
+	
 	if( sp -> refcnt == cp -> buf_amt){
 		sp -> fl_head = sp -> fl_tail = NULL;	
 		__rem_slab(&(cp -> sp_part), sp);
 		__add_slab(&(cp -> sp_full), sp);
 	}else{
-		sp -> fl_head = *temp;
+		void **next   = object + cp -> buf_sz - void_sz;
+		sp -> fl_head = *next;
 	}
 
-	//printf("kmem_cache_alloc: sp %d, refcnt %d, fl_head %d\n", sp, sp->refcnt, sp->fl_head);
+	//printf("kmem_cache_alloc: sp %d, refcnt %d, fl_head %d obj %d\n", sp, sp->refcnt, sp->fl_head, object);
 
 	return object;
 }
@@ -181,18 +215,24 @@ kmem_cache_alloc(struct kmem_cache *cp, int flags)
 void 
 kmem_cache_free(struct kmem_cache *cp, void *buf)
 {
-	int offset  = cp -> buf_sz * ( cp -> buf_amt - ( (int)buf % PAGE_SZ) / cp -> buf_sz);
-	
-	struct kmem_slab *sp = buf + offset;
-	
+	struct kmem_slab *sp;
+
+	if(cp -> slab_sz == PAGE_SZ){
+		int offset = cp -> buf_sz * ( cp -> buf_amt - ( (int)buf % PAGE_SZ) / cp -> buf_sz);
+		sp = buf + offset;
+	}else{
+		void **temp = buf + cp -> buf_sz - void_sz * 2;
+		sp = *temp;
+	}
+
 	if( sp -> refcnt == cp -> buf_amt){
 		sp -> fl_head = sp -> fl_tail = buf;
 		__rem_slab(&(cp -> sp_full), sp);
 		__add_slab(&(cp -> sp_part), sp);
 	
 	}else{
-		void **temp = sp -> fl_tail;
-		*temp = buf;
+		void **next = sp -> fl_tail + cp -> buf_sz - void_sz;
+		*next = buf;
 		sp -> fl_tail = buf;
 	}	
 

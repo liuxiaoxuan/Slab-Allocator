@@ -1,18 +1,18 @@
 #include <stdio.h>
-
+#include <math.h>
 
 #include <kmem_cache.h>
+#include <hash_table.h>
 
 #define rdtscll(val) __asm__ __volatile__("rdtsc" : "=A" (val))
 
 unsigned long long start, end;
 
-#define AMT 100
+#define AMT 300
 #define LOOP 1000
 
-
 struct foo{
-	char i[1000];
+	char i[500];
 };
 
 void 
@@ -22,8 +22,6 @@ alloc_and_free(){
 
 	int i;
 	struct foo *fp[AMT];
-
-
 
 	for(i = 0; i < AMT; i++){
 		fp[i] = kmem_cache_alloc(foo_cache, KM_SLEEP);
@@ -57,7 +55,7 @@ perf_test()
 	//warm up loop
 	for(i = 0; i < AMT; i++){
 		fp[i] = kmem_cache_alloc(foo_cache, KM_SLEEP);
-		fp[i] -> i[ i% 7 ] = 'a';
+		fp[i] -> i[ 7 ] = 'a';
 	}
 	
 	for(i = 0; i < AMT; i++)
@@ -70,11 +68,12 @@ perf_test()
 
 		for(i = 0; i < AMT; i++){
 			fp[i] = kmem_cache_alloc(foo_cache, KM_SLEEP);
-			fp[i] -> i[ i% 7 ] = 'a';
+			fp[i] -> i[ 6 ] = 'a';
 		}
-	
+
 		for(i = 0; i < AMT; i++)
 			kmem_cache_free(foo_cache,fp[i]);
+
 	}
 
 	rdtscll(end);
@@ -105,7 +104,10 @@ perf_test()
 
 
 int main()
-{
+{	
+	//struct kmem_cache *foo_cache =kmem_cache_create("foo",1500, 0, NULL, NULL);
+
+	//struct foo *fp = kmem_cache_alloc(foo_cache,0);
 
  	//alloc_and_free();
 	perf_test();
