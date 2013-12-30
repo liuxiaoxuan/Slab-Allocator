@@ -3,7 +3,7 @@
 
 #include <stdlib.h>
 
-#define SLAB_SIZE 4096
+#define PAGE_SZ 4096
 #define WORD 4
 #define KM_SLEEP 0
 #define KM_NOSLEEP 1
@@ -34,12 +34,14 @@ struct kmem_slab {
 
 struct kmem_cache {
 	char *name;
+	int slab_sz;
 	int buf_sz;
 	int buf_amt;
 	int align;
 	kc_fn_t constructor;
 	kc_fn_t destructor;
-	struct kmem_slab *sp;
+	struct kmem_slab *sp_curr;
+	struct kmem_slab *sp_head;
 };
 
 struct kmem_cache *
@@ -53,5 +55,11 @@ kmem_cache_free(struct kmem_cache *cp, void *buf);
 
 void 
 kmem_cache_destroy(struct kmem_cache *cp);
+
+int 
+__slab_sz(int obj_sz);
+
+void 
+__print_slab(struct kmem_cache *cp);
 
 #endif
