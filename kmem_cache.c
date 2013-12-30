@@ -6,6 +6,9 @@
 
 #define INTER_FG 0.125
 
+#define INC 1
+#define DEC 0
+
 size_t void_sz = sizeof(void *);
 size_t kmem_bufctl_sz = sizeof(struct kmem_bufctl);
 size_t kmem_slab_sz = sizeof(struct kmem_slab);
@@ -59,7 +62,7 @@ __init_buf(void *slab, int buf_sz, int buf_amt)
 
 	for(i = 0; i < buf_amt; i++){
 		curr    = slab + buf_sz * i ;	
-		curr[0] =  slab + buf_sz * (i + 1);
+		*curr   =  slab + buf_sz * (i + 1);
 
 		//printf("__init_buf: curr_addr %d, curr_val %d\n", &curr[0], curr[0]);
 	}
@@ -72,12 +75,11 @@ __create_slab(struct kmem_cache *cp)
 {
 	void *slab = memalign(cp -> slab_sz, cp -> slab_sz);
 
-	assert(!((int)slab % PAGE_SZ));
+	assert(!((int)slab % cp -> slab_sz));
 
 	struct kmem_slab *sp_new = slab + cp -> buf_amt * cp -> buf_sz;
 
-	printf("__create_slab: slab %d, sp %d, offset %d\n",slab, sp_new, (int)sp_new - (int)slab);
-
+	//printf("__create_slab: slab %d, sp %d, offset %d\n",slab, sp_new, (int)sp_new - (int)slab);
 
 	__init_slab(sp_new, slab, cp -> buf_sz, cp -> buf_amt);
 	__init_buf(slab, cp -> buf_sz, cp -> buf_amt);
@@ -85,34 +87,40 @@ __create_slab(struct kmem_cache *cp)
 	return sp_new;
 }
 
+void 
+__add_slab(struct kmem_slab **head, struct kmem_slab *curr)
+{
+	if(!(*head)){
+		*head = curr;
+		return;
+	}
+		
+	struct kmem_slab *next = (*head) -> next;
+	
+	(*head) -> next = curr;
+	curr -> prev = (*head);
+	curr -> next = next;
+
+	if(next)
+		next -> prev = curr;
+}
+
 void
-__swap_slab(struct kmem_cache *cp, struct kmem_slab *curr)      //swap the curr and curr -> next
+__rem_slab(struct kmem_slab **head, struct kmem_slab *curr)
 {
 	struct kmem_slab *next = curr -> next;
+	struct kmem_slab *prev = curr -> prev;
 
-	if( next && next -> refcnt > curr -> refcnt){
-
-		printf("__swap_slab: curr refcnt %d, next refcnt %d\n", curr->refcnt, next->refcnt);
-		
-		if(cp -> sp_curr = curr)
-			cp -> sp_curr = next;
-
-		if(curr -> prev){				
-			curr -> prev -> next = next;
-			next -> prev = curr -> prev;
-		}else{
-			cp -> sp_head = next;
-			next -> prev = NULL;
-		}
-	
-		if(next -> next)
-			next -> next -> prev = curr;
-
-		curr -> next = next -> next;
-		
-		curr -> prev = next;
-		next -> next = curr;	
+	if(curr == (*head)){
+		(*head) = next;
+	}else{
+		prev -> next = next;
 	}
+	
+	if(next) 
+		next -> prev = prev;
+	
+	curr -> next = curr -> prev = NULL;
 }
 
 struct kmem_cache *
@@ -127,43 +135,46 @@ kmem_cache_create(char *name, size_t size, int align, kc_fn_t constructor, kc_fn
 	cp -> align         = align;
 	cp -> constructor   = constructor;
 	cp -> destructor    = destructor;	
-	
-	//printf("kmem_cache_create: c_sz %d, s_sz %d, b_sz %d\n",kmem_cache_sz, kmem_slab_sz,kmem_bufctl_sz);
-	printf("kmem_cache_create: cp %d, slab_sz %d, buf_sz %d, buf_amt %d\n",cp,cp->slab_sz, cp->buf_sz,cp->buf_amt);
 
-	cp -> sp_head       = __create_slab(cp);
-	cp -> sp_curr       = cp -> sp_head;
+	//printf("kmem_cache_create: cp %d, slab_sz %d, buf_sz %d, buf_amt %d\n",cp,cp->slab_sz, cp->buf_sz,cp->buf_amt);
+	cp -> sp_full       = NULL;
+	cp -> sp_part       = NULL;
+	cp -> sp_empt       = NULL;
+
 	return cp;
 }
 
 void *
 kmem_cache_alloc(struct kmem_cache *cp, int flags)
 {
-	struct kmem_slab *sp = cp -> sp_curr;
+	struct kmem_slab *sp;
 
-	if(sp -> refcnt == cp -> buf_amt){	
-		if( !sp -> next){
-			sp -> next = __create_slab(cp);
-			sp -> next -> prev = sp;	
+	if(!cp -> sp_part){
+		if(cp -> sp_empt){
+			sp =  cp -> sp_empt;
+			__rem_slab(&(cp -> sp_empt), sp);
+			__add_slab(&(cp -> sp_part), sp);
+		}else{
+			cp -> sp_part = __create_slab(cp);
 		}
-		sp = sp -> next;
-		cp -> sp_curr = sp;
 	}
+
+	sp = cp -> sp_part;
 
 	sp -> refcnt++;
 	void *object = sp -> fl_head;
 	void **temp = sp -> fl_head;
 
-	if( sp -> refcnt == cp -> buf_amt)
-		sp -> fl_head = sp -> fl_tail = NULL;
-	else
-		sp -> fl_head = temp[0];
-	
-	printf("kmem_cache_alloc: refcnt %d, fl_head %d\n", sp->refcnt, sp->fl_head);
+	if( sp -> refcnt == cp -> buf_amt){
+		sp -> fl_head = sp -> fl_tail = NULL;	
+		__rem_slab(&(cp -> sp_part), sp);
+		__add_slab(&(cp -> sp_full), sp);
+	}else{
+		sp -> fl_head = *temp;
+	}
 
-	if(sp -> prev)	
-		__swap_slab(cp, sp -> prev);
-	
+	//printf("kmem_cache_alloc: sp %d, refcnt %d, fl_head %d\n", sp, sp->refcnt, sp->fl_head);
+
 	return object;
 }
 
@@ -174,49 +185,68 @@ kmem_cache_free(struct kmem_cache *cp, void *buf)
 	
 	struct kmem_slab *sp = buf + offset;
 	
-	printf("kmem_cache_free: sp %d, buf %d, buf offset %d\n", sp, buf, offset);
-
 	if( sp -> refcnt == cp -> buf_amt){
 		sp -> fl_head = sp -> fl_tail = buf;
+		__rem_slab(&(cp -> sp_full), sp);
+		__add_slab(&(cp -> sp_part), sp);
+	
 	}else{
 		void **temp = sp -> fl_tail;
-		temp[0] = buf;
+		*temp = buf;
 		sp -> fl_tail = buf;
-	}
+	}	
 
 	sp -> refcnt--;
 
-	__swap_slab(cp, sp);
+	if(sp -> refcnt == 0){
+		__rem_slab(&(cp -> sp_part), sp);
+		__add_slab(&(cp -> sp_empt), sp);
+	}
 
-	
-	//printf("kmem_cache_free: refcnt %d, fl_tail %d\n", sp->refcnt, sp->fl_tail);
+	//printf("kmem_cache_free: sp %d, refcnt %d, fl_tail %d\n", sp, sp->refcnt, sp->fl_tail);
+}
+
+void
+__free_slab(struct kmem_slab *head)
+{
+	struct kmem_slab *curr;
+
+	while(head){
+		curr = head;
+		head = head -> next;
+		free(curr -> slab);
+	}	
 }
 
 void 
 kmem_cache_destroy(struct kmem_cache *cp)
 {
-	struct kmem_slab *sp = cp -> sp_head;
+	__free_slab(cp -> sp_full);
+	__free_slab(cp -> sp_part);
+	__free_slab(cp -> sp_empt);
 	
-	while(sp -> next){
-		sp = sp -> next;
-		free( sp -> prev -> slab);
-	}
-	
-	free(sp -> slab);
 	free(cp);
 }
 
 void 
 __print_slab(struct kmem_cache *cp)
 {
-	struct kmem_slab *sp = cp -> sp_head;
+	struct kmem_slab *sp;
 	
-	printf("curr sp %d, slab list: %d %d, ", cp -> sp_curr, sp, sp -> refcnt);	
-
-	while(sp -> next){
-		sp = sp -> next;
+	printf("sp_full: ");	
+	for(sp = cp -> sp_full; sp; sp = sp -> next)
 		printf("%d, %d, ", sp, sp -> refcnt);
-	}
-	
 	printf("\n");
+	
+		
+	printf("sp_part: ");	
+	for(sp = cp -> sp_part; sp; sp = sp -> next)
+		printf("%d, %d, ", sp, sp -> refcnt);
+	printf("\n");
+	
+	printf("sp_empt: ");	
+	for(sp = cp -> sp_empt; sp; sp = sp -> next)
+		printf("%d, %d, ", sp, sp -> refcnt);
+	printf("\n");
+	
 }

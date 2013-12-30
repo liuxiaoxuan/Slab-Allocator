@@ -7,6 +7,9 @@
 
 unsigned long long start, end;
 
+#define AMT 100
+#define LOOP 1000
+
 
 struct foo{
 	char i[1000];
@@ -18,21 +21,20 @@ alloc_and_free(){
 	struct kmem_cache *foo_cache =kmem_cache_create("foo",sizeof(struct foo), 0, NULL, NULL);
 
 	int i;
-
-	struct foo *fp[5];
-
+	struct foo *fp[AMT];
 
 
-	for(i = 0; i < 5; i++){
+
+	for(i = 0; i < AMT; i++){
 		fp[i] = kmem_cache_alloc(foo_cache, KM_SLEEP);
-		//printf("fp[%d] %d\n",i,fp[i]);
+		__print_slab(foo_cache);
 	}
 	
-	for(i = 0; i < 5; i++){	
+	for(i = 0; i < AMT; i++){	
 		kmem_cache_free(foo_cache,fp[i]);
 		__print_slab(foo_cache);
 	}
-	for(i = 0; i < 5; i++){
+	for(i = 0; i < AMT; i++){
 		fp[i] = kmem_cache_alloc(foo_cache, KM_SLEEP);
 		__print_slab(foo_cache);
 	}
@@ -48,10 +50,7 @@ perf_test()
 {
 	int i,j;
 
-	int AMT = 20;
-	int LOOP = 1000;
-
-	struct foo *fp[30];
+	struct foo *fp[AMT];
 
 	struct kmem_cache *foo_cache =kmem_cache_create("foo",sizeof(struct foo), 0, NULL, NULL);
 
@@ -108,8 +107,8 @@ perf_test()
 int main()
 {
 
- 	alloc_and_free();
-	//perf_test();
+ 	//alloc_and_free();
+	perf_test();
 
 	//printf("main end %d\n", __slab_sz(2000));
 

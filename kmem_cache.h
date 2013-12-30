@@ -19,6 +19,7 @@ struct kmem_bufctl {
 
 struct kmem_slab {
 	void *slab;
+
 	struct kmem_slab *next;
 	struct kmem_slab *prev;
 	
@@ -34,14 +35,18 @@ struct kmem_slab {
 
 struct kmem_cache {
 	char *name;
+
 	int slab_sz;
 	int buf_sz;
 	int buf_amt;
 	int align;
+
 	kc_fn_t constructor;
 	kc_fn_t destructor;
-	struct kmem_slab *sp_curr;
-	struct kmem_slab *sp_head;
+
+	struct kmem_slab *sp_full;
+	struct kmem_slab *sp_part;
+	struct kmem_slab *sp_empt;
 };
 
 struct kmem_cache *
@@ -61,5 +66,6 @@ __slab_sz(int obj_sz);
 
 void 
 __print_slab(struct kmem_cache *cp);
+
 
 #endif
