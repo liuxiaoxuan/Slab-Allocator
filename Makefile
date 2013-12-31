@@ -1,7 +1,7 @@
 BIN=main
-OBJS=main.o 
+OBJS=main.o kmem_cache.o 
 CC=gcc
-CFLAGS=-O3 -ggdb3 -I. -lpthread -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Wno-unused-variable
+CFLAGS=-O3 -ggdb3 -I. -lm -lpthread -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Wno-unused-variable
 #DEFINES=
 
 all:	$(BIN)
