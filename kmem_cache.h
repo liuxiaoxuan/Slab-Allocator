@@ -18,6 +18,7 @@ struct kmem_bufctl {
 };
 
 struct kmem_slab {
+	void *slab_idx;
 	struct kmem_slab *next;
 	struct kmem_slab *prev;
 	
@@ -28,7 +29,6 @@ struct kmem_slab {
 	int refcnt;
 
 };
-
 
 struct kmem_cache {
 	char *name;
