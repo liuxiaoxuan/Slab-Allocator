@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <malloc.h>
 
 #include<kmem_cache.h>
 
@@ -17,66 +18,49 @@ __align_offset(size_t size, int align)
 }
 
 void
-__init_cache(void *ptr, char *name, int buf_sz, int align, kc_fn_t constructor, kc_fn_t destructor, void *sp)
-{
-	struct kmem_cache *cp = ptr;
-	
-	cp -> name          = name;
-	cp -> buf_sz         = buf_sz;
-	cp -> align         = align;
-	cp -> constructor   = constructor;
-	cp -> destructor    = destructor;
-	cp -> sp            = sp;
-}
-
-void
-__init_slab(void *ptr, void *slab_idx, void *freelist)
+__init_slab(void *ptr, void *slab, int buf_sz, int buf_amt)
 {	
 	struct kmem_slab *sp = ptr;
 
-	sp -> slab_idx      = slab_idx;
+	sp -> slab          = slab;
 	sp -> refcnt        = 0;
 	sp -> next          = NULL;
 	sp -> prev          = NULL;
-	sp -> freelist      = freelist;
+	sp -> fl_head       = slab_idx;
+	sp -> fl_tail       = slab_idx + buf_sz * (buf_amt - 1);
 }
 
 void 
-__init_buf(void *slab, void *sp, int buf_sz, int buf_amt)
+__init_buf(void *slab, int buf_sz, int buf_amt)
 {
 	int i;
 	
-	void *next, *prev, *sp2;
+	void *curr, *next;
 		
-	for(i = 1; i <= buf_amt; i++){
-		next   = slab + buf_sz * i - void_sz * 2;
-		prev   = next + void_sz;	
-		sp2    = prev + void_sz;
-		
-		*next  = slab + buf_sz * i;
-		*prev  = slab + buf_sz * (i - 1);
-		*sp2   = sp;
+	for(i = 0; i < buf_amt; i++){
+		curr   = slab + buf_sz * i ;	
+		next   = curr + buf_sz;
+		*curr = next;
 	}
 	
-	*next = slab;
-	prev = slab + buf_sz - void_sz;
-	*prev = slab + buf_sz * (buf_amt - 1);
-	
+	*curr = slab;	
 }
 
 void *
-__create_slab(int buf_sz)
+__create_slab(struct kmem_cache *cp)
 {
-	void *slab = malloc(SLAB_SIZE);
-	
-	int buf_amt = (SLAB_SIZE - kmem_slab_sz) / bufsz;
-	
-	void *sp = slab + buf_amt * bufsz;
+	void *slab = memalign(SLAB_SIZE, SLAB_SIZE);
 
-	__init_slab(sp, slab, slab);
-	__init_buf(slab, sp, buf_sz, buf_amt);
+	void *sp_new = slab + cp -> buf_amt * cp -> buf_sz;
+
+	__init_slab(sp, slab, buf_sz, buf_amt);
+	__init_buf(slab, buf_sz, buf_amt);
 	
-	return sp;
+	cp -> sp -> next = sp_new;
+	sp_new -> prev = cp -> sp;	
+	cp -> sp = sp_new;
+	
+	return sp_new;
 }
 
 void
@@ -100,47 +84,31 @@ __sort_slab(struct kmem_slab *sp)
 }
 
 void
-__rem_buf(struct kmem_slab *sp, void *buf, int buf_sz)
-{
-	void *curr_next, *curr_prev, *next_next, *next_prev, *prev_next, *prev_prev;
-	
-	curr_next = buf + buf_sz - void_sz * 2;
-	curr_prev = next + void_sz;
-	
-	next_next = *curr_next + buf_sz - void_sz * 2;
-	next_prev = next_next + void_sz;
-	
-	prev_next = *curr_prev + buf_sz - void_sz * 2;
-	prev_prev = prev_next + buf_sz;
-	
-	*next_prev = *curr_prev;
-	*prev_next = *curr_next;
-	
-	sp -> freelist = *curr_next;	
+__rem_buf(struct kmem_slab *sp)
+{	
+	sp -> fl_tail = *(sp -> fl_tail);
 }
 
 void
-__add_buf(struct kmem_slab *sp, void *buf, int buf_sz)
-{
-
+__add_buf(struct kmem_slab *sp, void *buf)
+{	
+	*(sp -> fl_tail) = buf;
+	sp -> fl_tail = buf;
 }
 
 struct kmem_cache *
 kmem_cache_create(char *name, size_t size, int align, kc_fn_t constructor, kc_fn_t destructor)
 {
-	void *slab = malloc(SLAB_SIZE);
+	kmem_cache *cp = memalign(SLAB_SIZE, SLAB_SIZE);
 	
-	int buf_sz = size + __align_offset(size, align) + void_sz * 3 + WORD;
+	cp -> name          = name;
+	cp -> buf_sz        = size + __align_offset(size, align);
+	cp -> buf_amt       = (SLAB_SIZE - kmem_slab_sz) / buf_sz;
+	cp -> align         = align;
+	cp -> constructor   = constructor;
+	cp -> destructor    = destructor;	
+	cp -> sp            = __create_slab(cp);
 	
-	int buf_amt = (SLAB_SIZE - kmem_cache_sz - kmem_slab_sz) / buf_sz;
-	
-	void *cp = slab + buf_amt * buf_sz;
-	void *sp = cp + kmem_cache_sz;
-	
-	__init_cache(cp, name, buf_sz, align, constructor, destructor, sp);
-	__init_slab(sp, slab, slab);
-	__init_buf(slab, sp, buf_sz, buf_amt);
-
 	return cp;
 }
 
@@ -149,32 +117,28 @@ kmem_cache_alloc(struct kmem_cache *cp, int flags)
 {
 	struct kmem_slab *sp = cp -> sp;
 
-	if( sp -> buf_cnt == sp -> buf_amt){
-		if (!sp -> next)
-			struct kmem_slab *sp_new = __create_slab(cp -> buf_sz);
-			sp -> next = sp_new;
-			sp_new -> prev = sp;
-			sp = sp_new;
-		}
-		sp = sp -> next;
-		cp -> sp = sp;
+	if( sp -> buf_cnt == sp -> buf_amt && !sp -> next){	
+		sp = __create_slab(cp);
 	}
 	
-	void *object = sp -> freelist -> object;
+	void *object = sp -> fl_head -> object;
 	sp -> refcnt++;
-	__rem_buf(sp, sp -> freelist, cp -> buf_sz);
+	__rem_buf(sp);
 	__sort_slab(sp);
 	
-	return sp -> freelist -> object;
+	return sp -> fl_head -> object;
 }
 
 void 
 kmem_cache_free(struct kmem_cache *cp, void *buf)
 {
-	struct kmem_slab *sp = buf + cp -> size + WORD + void_sz * 2;
+	int buf_sz  = cp -> buf_sz;
+	int buf_amt = cp -> buf_amt;
+
+	struct kmem_slab *sp = buf + buf_sz *(buf_amt - (buf % SLAB_SIZE) / buf_sz);
 	
 	sp -> refcnt--;
-	__add_buf(sp, buf, cp -> buf_sz);
+	__add_buf(sp, buf);
 	__sort_slab(sp -> next);
 }
 
